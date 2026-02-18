@@ -23,6 +23,15 @@ const getPetStage = (xp: number): PetStage => {
   return PetStage.EGG;
 };
 
+// Helper to get local date string YYYY-MM-DD
+const getToday = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const Game: React.FC<GameProps> = ({ username, onLogout }) => {
   // Helper for user-specific keys
   const getStorageKey = (key: string) => `hh_${username}_${key}`;
@@ -45,7 +54,7 @@ const Game: React.FC<GameProps> = ({ username, onLogout }) => {
       coins: 0,
       gems: 0,
       dayStreak: 0,
-      lastLoginDate: new Date().toISOString().split('T')[0],
+      lastLoginDate: getToday(),
       inventory: []
     };
   });
@@ -98,25 +107,53 @@ const Game: React.FC<GameProps> = ({ username, onLogout }) => {
 
   // --- Daily Reset Logic ---
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    if (user.lastLoginDate !== today) {
-      const missedDay = new Date(today).getTime() - new Date(user.lastLoginDate).getTime() > 86400000;
-      
-      setUser(prev => ({
-        ...prev,
-        lastLoginDate: today,
-        dayStreak: missedDay ? 0 : prev.dayStreak
-      }));
+    const checkAndReset = () => {
+      const today = getToday();
+      if (user.lastLoginDate !== today) {
+        // Calculate if streak is preserved (must be yesterday)
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+        
+        const isConsecutive = user.lastLoginDate === yesterdayStr;
+        const missedDay = !isConsecutive && user.lastLoginDate !== today; // If not today and not yesterday, we missed a day.
 
-      setHabits(prev => prev.map(h => ({ ...h, completed: false })));
+        setUser(prev => ({
+          ...prev,
+          lastLoginDate: today,
+          dayStreak: missedDay ? 0 : prev.dayStreak
+        }));
 
-      const timeHour = new Date().getHours();
-      const timeOfDay = timeHour < 12 ? 'morning' : timeHour < 18 ? 'afternoon' : 'evening';
-      generatePetGreeting(pet.name, pet.stage, timeOfDay).then(msg => {
-        setPetMessage(msg);
-        setTimeout(() => setPetMessage(null), 5000);
-      });
-    }
+        setHabits(prev => prev.map(h => ({ ...h, completed: false })));
+
+        const timeHour = new Date().getHours();
+        const timeOfDay = timeHour < 12 ? 'morning' : timeHour < 18 ? 'afternoon' : 'evening';
+        generatePetGreeting(pet.name, pet.stage, timeOfDay).then(msg => {
+          setPetMessage(msg);
+          setTimeout(() => setPetMessage(null), 5000);
+        });
+      }
+    };
+
+    // Run immediately on mount/update
+    checkAndReset();
+
+    // Run on visibility change (tab switch)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndReset();
+      }
+    };
+
+    // Run on interval (every minute) to catch midnight crossover while open
+    const intervalId = setInterval(checkAndReset, 60000);
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user.lastLoginDate, pet.name, pet.stage]);
 
   // --- Actions ---
